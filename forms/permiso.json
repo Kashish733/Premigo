@@ -1,0 +1,140 @@
+{
+  "doc_type": "Permiso para Excursión Escolar",
+  "fields": [
+    {
+      "id": "student_name",
+      "label_en": "Student name",
+      "label_es": "Nombre del estudiante",
+      "hint_en": "Write your child's full name.",
+      "hint_es": "Escriba el nombre completo de su hijo/a.",
+      "bbox": [
+        0.1875,
+        0.2222222222222222,
+        0.375,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "grade",
+      "label_en": "Grade",
+      "label_es": "Grado",
+      "hint_en": "Write your child's grade, like 3rd.",
+      "hint_es": "Escriba el grado, por ejemplo 3.°.",
+      "bbox": [
+        0.6041666666666666,
+        0.2222222222222222,
+        0.20833333333333334,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "guardian",
+      "label_en": "Parent/guardian name",
+      "label_es": "Nombre del padre/madre o tutor",
+      "hint_en": "Write YOUR name.",
+      "hint_es": "Escriba SU nombre.",
+      "bbox": [
+        0.1875,
+        0.35185185185185186,
+        0.375,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "phone",
+      "label_en": "Phone",
+      "label_es": "Teléfono",
+      "hint_en": "A number where the school can reach you.",
+      "hint_es": "Un número donde la escuela pueda llamarle.",
+      "bbox": [
+        0.6041666666666666,
+        0.35185185185185186,
+        0.20833333333333334,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "allergies",
+      "label_en": "Allergies / medical conditions",
+      "label_es": "Alergias o condiciones médicas",
+      "hint_en": "List allergies, or write \"none\".",
+      "hint_es": "Escriba las alergias, o \"ninguna\".",
+      "bbox": [
+        0.1875,
+        0.48148148148148145,
+        0.625,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "authorize",
+      "label_en": "Yes, I authorize my child to go",
+      "label_es": "Sí, autorizo",
+      "hint_en": "Check this box to give permission.",
+      "hint_es": "Marque esta casilla para dar permiso.",
+      "bbox": [
+        0.1875,
+        0.5925925925925926,
+        0.020833333333333332,
+        0.037037037037037035
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "decline",
+      "label_en": "No, I do not authorize",
+      "label_es": "No autorizo",
+      "hint_en": "Check this box to refuse.",
+      "hint_es": "Marque esta casilla para negar el permiso.",
+      "bbox": [
+        0.1875,
+        0.6666666666666666,
+        0.020833333333333332,
+        0.037037037037037035
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "signature",
+      "label_en": "Parent/guardian signature",
+      "label_es": "Firma",
+      "hint_en": "Sign here. Do not sign for the date.",
+      "hint_es": "Firme aquí.",
+      "bbox": [
+        0.1875,
+        0.8148148148148148,
+        0.375,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "date",
+      "label_en": "Date",
+      "label_es": "Fecha",
+      "hint_en": "Today's date: month/day/year.",
+      "hint_es": "La fecha de hoy: mes/día/año.",
+      "bbox": [
+        0.6041666666666666,
+        0.8148148148148148,
+        0.20833333333333334,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    }
+  ]
+}

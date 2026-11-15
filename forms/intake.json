@@ -1,0 +1,125 @@
+{
+  "doc_type": "New Patient Intake Form",
+  "fields": [
+    {
+      "id": "full_name",
+      "label_en": "Full legal name",
+      "label_es": "Nombre legal completo",
+      "hint_en": "Your name as on your ID.",
+      "hint_es": "Su nombre como aparece en su identificación.",
+      "bbox": [
+        0.1875,
+        0.2222222222222222,
+        0.375,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "dob",
+      "label_en": "Date of birth",
+      "label_es": "Fecha de nacimiento",
+      "hint_en": "Month/day/year.",
+      "hint_es": "Mes/día/año.",
+      "bbox": [
+        0.6041666666666666,
+        0.2222222222222222,
+        0.20833333333333334,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "address",
+      "label_en": "Home address",
+      "label_es": "Domicilio",
+      "hint_en": "Street, city, ZIP.",
+      "hint_es": "Calle, ciudad, código postal.",
+      "bbox": [
+        0.1875,
+        0.35185185185185186,
+        0.625,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "insurance",
+      "label_en": "Insurance provider & ID",
+      "label_es": "Seguro médico e ID",
+      "hint_en": "Copy from your insurance card.",
+      "hint_es": "Copie de su tarjeta del seguro.",
+      "bbox": [
+        0.1875,
+        0.48148148148148145,
+        0.375,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "medications",
+      "label_en": "Current medications",
+      "label_es": "Medicamentos actuales",
+      "hint_en": "List everything you take, or \"none\".",
+      "hint_es": "Liste todo lo que toma, o \"ninguno\".",
+      "bbox": [
+        0.1875,
+        0.6111111111111112,
+        0.625,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "consent",
+      "label_en": "I consent to treatment",
+      "label_es": "Doy mi consentimiento",
+      "hint_en": "Check to consent to treatment.",
+      "hint_es": "Marque para dar su consentimiento.",
+      "bbox": [
+        0.1875,
+        0.7222222222222222,
+        0.020833333333333332,
+        0.037037037037037035
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "signature",
+      "label_en": "Signature",
+      "label_es": "Firma",
+      "hint_en": "Sign here.",
+      "hint_es": "Firme aquí.",
+      "bbox": [
+        0.1875,
+        0.8333333333333334,
+        0.375,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    },
+    {
+      "id": "date",
+      "label_en": "Date",
+      "label_es": "Fecha",
+      "hint_en": "Today's date.",
+      "hint_es": "La fecha de hoy.",
+      "bbox": [
+        0.6041666666666666,
+        0.8333333333333334,
+        0.20833333333333334,
+        0.040740740740740744
+      ],
+      "filled": false,
+      "value": null
+    }
+  ]
+}
