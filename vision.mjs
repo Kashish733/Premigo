@@ -88,7 +88,7 @@ export function parseJson(text) {
 
 async function readWithGemini(jpeg) {
   const { GoogleGenAI } = await import('@google/genai');
-  genai ??= new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+  genai ??= new GoogleGenAI({ apiKey: process.env.VISION_API_KEY || process.env.GOOGLE_API_KEY });
   const res = await gen({
     model: process.env.VISION_MODEL || 'gemini-3.1-flash-lite',
     contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data: jpeg.toString('base64') } }, { text: 'Read this page.' }] }],
@@ -130,7 +130,7 @@ export async function reviewDocument(image, doc) {
   let raw;
   if (visionProvider() === 'gemini') {
     const { GoogleGenAI } = await import('@google/genai');
-    genai ??= new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+    genai ??= new GoogleGenAI({ apiKey: process.env.VISION_API_KEY || process.env.GOOGLE_API_KEY });
     const res = await gen({
       model: process.env.VISION_MODEL || 'gemini-3.1-flash-lite',
       contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data: jpeg.toString('base64') } }, { text }] }],
@@ -162,7 +162,27 @@ async function retry(fn) {
     return fn();
   }
 }
-function gen(args) { return retry(() => genai.models.generateContent(args)); }
+// Hedged request. The free Gemini tier queues requests under load: the same call takes 0.5 s one moment and 15 s the next.
+// If the first model has not answered in HEDGE_AFTER_MS, ask a second model too and take whichever answers first; if the
+// first one fails outright, switch to the second at once. Far better than waiting out a long timeout and retrying.
+const HEDGE_MODEL = process.env.VISION_HEDGE_MODEL || 'gemini-3.5-flash-lite';
+const HEDGE_AFTER_MS = 3500;
+function gen(args) {
+  return new Promise((resolve, reject) => {
+    let done = false, pending = 0, hedged = false, timer;
+    const finish = (fn, value) => { if (!done) { done = true; clearTimeout(timer); fn(value); } };
+    const launch = model => {
+      pending++;
+      genai.models.generateContent({ ...args, model }).then(res => finish(resolve, res), err => {
+        pending--;
+        if (!hedged) { hedged = true; launch(HEDGE_MODEL); } // the first one failed: try the other now
+        else if (pending === 0) finish(reject, err);
+      });
+    };
+    launch(args.model);
+    timer = setTimeout(() => { if (!done && !hedged) { hedged = true; launch(HEDGE_MODEL); } }, HEDGE_AFTER_MS);
+  });
+}
 
 /** 64-bit average hash of a page photo, as a 64-char bit string. Similar pictures give similar hashes. */
 export async function pageHash(image) {
@@ -187,7 +207,7 @@ ${FINE_RULES}If no page is visible, return {"heads_up":[],"scam_check":{"risk":"
 /** Reads footers, footnotes and warnings at high resolution. Returns { heads_up, scam_check, small_print_illegible }. */
 export async function readFinePrint(image) {
   const jpeg = await sharp(image).resize({ width: READ_WIDTH, withoutEnlargement: true }).jpeg({ quality: 82 }).toBuffer();
-  const out = await askJson(FINE_SYSTEM, jpeg, 'Read the small print and warnings on this page.', 40000, 3000);
+  const out = await askJson(FINE_SYSTEM, jpeg, 'Read the small print and warnings on this page.', 15000, 3000);
   out.heads_up = (out.heads_up ?? []).filter(h => h.plain_en && h.plain_es);
   out.scam_check ??= { risk: 'none' };
   return out;
@@ -198,7 +218,7 @@ async function askJson(system, jpeg, text, timeoutMs = 25000, maxTokens = 2500) 
   let raw;
   if (visionProvider() === 'gemini') {
     const { GoogleGenAI } = await import('@google/genai');
-    genai ??= new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+    genai ??= new GoogleGenAI({ apiKey: process.env.VISION_API_KEY || process.env.GOOGLE_API_KEY });
     const res = await gen({
       model: process.env.VISION_MODEL || 'gemini-3.1-flash-lite',
       contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data: jpeg.toString('base64') } }, { text }] }],
@@ -223,7 +243,7 @@ export async function warmVision() {
   await sharp({ create: { width: 16, height: 16, channels: 3, background: '#fff' } }).jpeg().toBuffer();
   if (visionProvider() === 'gemini') {
     const { GoogleGenAI } = await import('@google/genai');
-    genai ??= new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+    genai ??= new GoogleGenAI({ apiKey: process.env.VISION_API_KEY || process.env.GOOGLE_API_KEY });
   } else if (visionProvider() === 'claude') {
     client ??= new Anthropic();
   }
@@ -503,7 +523,7 @@ Be concise: at most three short sentences, plain words, in English. Never invent
   const text = `Question: ${question}\n\nNotes about earlier parts of the same document (may be empty):\n${memory || '(none)'}`;
   if (visionProvider() === 'gemini') {
     const { GoogleGenAI } = await import('@google/genai');
-    genai ??= new GoogleGenAI({ apiKey: process.env.GOOGLE_API_KEY });
+    genai ??= new GoogleGenAI({ apiKey: process.env.VISION_API_KEY || process.env.GOOGLE_API_KEY });
     const res = await gen({
       model: process.env.VISION_MODEL || 'gemini-3.1-flash-lite',
       contents: [{ role: 'user', parts: [{ inlineData: { mimeType: 'image/jpeg', data: jpeg.toString('base64') } }, { text }] }],

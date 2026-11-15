@@ -76,7 +76,7 @@ them full-screen on a second screen, and hold the phone camera to the page.
 
 ## Tuning and debugging
 
-- **Lip sync:** `MOUTH_DELAY_MS` (default 1000). The mouth follows the real loudness of the voice, shifted by this delay to match what the phone hears.
+- **Lip sync:** `MOUTH_DELAY_MS` (default 1400). During a call you can also say "the mouth is early" or "the mouth is late" to shift it by a quarter second. The mouth follows the real loudness of the voice, shifted by this delay to match what the phone hears.
   Mouth ahead of the voice: raise it. Mouth behind: lower it. The delay differs a little from call to call.
 - **Picture size:** FaceTime fits our video into a 16:9 window; the default is 1280x720 (`OUT_W`, `OUT_H`). `NOTICE_CALIBRATE=1` sends a test pattern so you can see how your phone fits it.
 - **Offline tests:** `node test-annotate.mjs`, `node test-tracker.mjs`, `node test-frame.mjs` (write images to `out/`, which is git-ignored).

@@ -13,6 +13,11 @@ import { renderBadge, renderCharacterFrame } from './character.mjs';
 import { hashDistance, pageHash, readDocument, readFinePrint, reviewDocument, sharpness, snapBoxes, alignBoxes, answerAboutPage, visionProvider, warmVision } from './vision.mjs';
 import { runAgent } from './chert-rooms.mjs';
 import { greetOnBridgeReady } from './greet.mjs';
+import { loadGreeting } from './greeting.mjs';
+
+// Last line of defence: a stray error in a timer or a callback must not kill the call.
+process.on('uncaughtException', err => console.error('uncaught exception (kept running):', err?.message));
+process.on('unhandledRejection', err => console.error('unhandled rejection (kept running):', err?.message ?? err));
 
 const RENDER_FPS = 10; // video frames per second sent back (the camera view runs at half of this: it is heavier)
 const MIN_SHARPNESS = 15; // below this the page is too blurry to read
@@ -29,14 +34,15 @@ THE FLOW
 1. You have just greeted the caller and asked what they need. You gave a few EXAMPLES (filling out a document, understanding it, checking for scams), but those are only examples: you can help with anything about their documents (translate part of it, explain a word or a deadline, answer a question about it, check one detail...). Never say you can only do three things. Do NOT talk about any document until they say what they need.
 2. As soon as their need is clear, in any words and either language, answer with a short polite "Sure!" or "¡Claro!" and call set_mode: fill (help fill it out), understand (explain what it says), scam (check whether it looks like a scam), or other (anything else they ask about their document).
 3. The result of set_mode tells you exactly what to do next. If no document is visible yet, ask them to hold it up, steady and well lit, then wait: the system tells you when it is ready.
-4. They can change or add to what they want at any time ("now explain it", "is this a scam?", "what does this word mean?"): call set_mode again if the kind of help changes.
+4. They can change or add to what they want at any time ("now explain it", "is this a scam?", "what does this word mean?"): call set_mode again if the kind of help changes. A common order is: first understand (a summary), THEN "help me fill it out". Asking to fill the form out after a summary IS a change of help: call set_mode with fill FIRST, then answer. Never stay in the old mode.
 If their answer is unclear, ask a short question about what they need.
 
 WHILE HELPING
-- fill: one field at a time. Call highlight_field, then say what to write there. While they write, the system checks for mistakes and will ask you to correct them kindly: say it in one short sentence, say how to fix it, and do not call tools for it.
+- fill: one field at a time, in words: say the field's printed label and what to write there. Draw the green box (highlight_field) ONLY when the caller asks to see where a field is ("where", "show me", "highlight it"); never highlight on your own. While they write, the system checks for mistakes and will ask you to correct them kindly: say it in one short sentence, say how to fix it, and do not call tools for it.
 - understand: plain words. What it is, what they must do, then the small print.
 - scam: a clear verdict and what to do about it.
 - You only see the part of the document in front of the camera right now (and short notes about earlier parts). If the caller scrolls, turns the page, moves the camera, or asks about ANY detail (a price, a date, what to bring, where to sign, what a sentence means), NEVER say you cannot see it before you have looked: call ask_document with their question. Call read_page only to re-read the whole page.
+- NEVER say you have highlighted, pointed to or shown a field unless you actually called highlight_field in this turn and it returned "Highlighted". If you cannot, say so.
 - Checkboxes and choices (Yes / No, options): ALWAYS read the option's own words aloud and say where it is (top, bottom, left, right). Never say only "this box". The box drawn on screen is a visual aid and can be slightly off, especially when it is marked approximate, so the words are what the caller must rely on. When the caller ticks one, the system asks you to confirm which option they chose: do it.
 - The small print matters most. Always tell the caller what to bring, what it costs, deadlines, and anything they give up by signing (liability waivers, photo permission, data sharing, non-refundable fees), most important first, in plain words.
 - Scam safety: if the page shows signs of a scam (payment by gift card, crypto or Zelle, urgent threats, requests for a Social Security number or bank login, unknown links or phone numbers), say calmly that it looks suspicious, tell them NOT to pay or share personal information, and to check with the organization using a phone number or website they already trust. Say "signs to double check" unless the evidence is overwhelming.
@@ -50,7 +56,7 @@ Keep each reply short, at most three sentences. Say you are an AI. Never give le
 
 // What to do in each mode. Used by the set_mode tool and by the director when a document becomes ready.
 const DIRECTIVE = {
-  fill: 'MODE fill: guide the caller through filling it out. In at most two sentences say you will go one field at a time, then call highlight_field for the FIRST field and tell them what to write there. Move to the next field only when they say they are done. If something in the HEADS-UP list is essential (what to bring, a deadline, a fee), mention it briefly before you start.',
+  fill: 'MODE fill: guide the caller through filling it out, one field at a time, IN WORDS. In at most two sentences say you will go field by field, then describe the first field (its printed label and what to write there). Do NOT draw a box on the screen by yourself: call highlight_field only when the caller asks to see where a field is (for example "where do I write it?", "show me", "highlight it"). Move to the next field only when they say they are done. If something in the HEADS-UP list is essential (what to bring, a deadline, a fee), mention it briefly before you start.',
   understand: 'MODE understand: explain the document in plain words, at most four short sentences: what it is, what they must do, and the most important HEADS-UP items (what to bring, costs, deadlines, anything they give up by signing). Then ask if they want help filling it out or have questions.',
   other: 'MODE other: the caller wants something specific about their document. Do exactly what they asked (translate part of it, explain a word, a deadline or a fee, answer a question about it, check one detail), using the page information below. Keep it short and ask if they need anything else.',
   scam: 'MODE scam: give a clear verdict in two or three sentences (looks like an ordinary document / signs to double check / likely a scam), name the specific signs you see, and say what to do (never pay or share personal information; verify through a phone number or website they already trust). Then ask if they want it explained.',
@@ -58,7 +64,7 @@ const DIRECTIVE = {
 const MODE_LABEL = { fill: 'Llenar · Fill out', understand: 'Entender · Understand', scam: 'Estafa · Scam check', other: 'Ayuda · Help' };
 
 // Said once, as soon as FaceTime is ready: the greeting plus the question that starts the flow.
-const greeting = 'Say exactly this, nothing more: "Hola, soy Notice, tu ayudante de IA. Hi, I am Notice, your AI helper. Puedo ayudarte con tus documentos, por ejemplo llenarlos, entenderlos o revisar si son una estafa. ¿Qué necesitas? I can help with your documents, like filling them out, understanding them, or checking for scams. What do you need?"';
+const greeting = 'Say exactly this, nothing more: "Hola, soy Notice, tu ayudante de IA. Hi, I am Notice, your AI helper. Te ayudo con tus documentos: llenarlos, entenderlos o revisarlos. ¿Qué necesitas? What do you need?"';
 
 const agent = defineAgent({
   entry: async ctx => {
@@ -90,9 +96,11 @@ const agent = defineAgent({
     const memory = []; // short notes about parts of the document seen before the caller scrolled or moved on
     let movedSince = 0; // when the picture started to shift/zoom noticeably (a scroll); 0 = steady
     let newSection = false, lastNewSectionAt = 0; // a new part of the same form came into view while filling it out
+    let lastHighlightAt = 0; // when highlight_field last ran (the model, or our fallback)
     let askId = 0, pendingAnswer = null; // ask_document: answer waiting to be spoken
     const toldHeads = new Set(); // small-print items already said aloud
     let directorTick = () => {}; // set once the voice session exists
+    let mouthDelayMs = Number(process.env.MOUTH_DELAY_MS ?? 1400); // lip-sync delay; the caller can nudge it by voice ("the mouth is early / late")
     let mouthLevel = () => null; // 0..1 loudness of the voice as the caller will hear it (set up once the session is running); null = unknown
     let modeAt = 0; // when the caller chose a mode
 
@@ -166,13 +174,13 @@ const agent = defineAgent({
             // Lost = the camera turned or the match is bad: draw no boxes until the next re-location (a few seconds)
             const bad = r.lost || r.similarity < 0.4; // lost, or the camera now shows different content: boxes would be wrong
             lostSince = bad ? lostSince || Date.now() : 0;
-            const scrolled = !bad && (Math.abs(tracker.t.dx) > 0.05 || Math.abs(tracker.t.dy) > 0.05 || Math.abs(tracker.t.s - 1) > 0.08 || r.similarity < 0.7);
+            const scrolled = !bad && (Math.abs(tracker.t.dx) > 0.085 || Math.abs(tracker.t.dy) > 0.085 || Math.abs(tracker.t.s - 1) > 0.09 || r.similarity < 0.7);
             movedSince = scrolled ? movedSince || Date.now() : 0;
             state = bad ? null : { ...doc, fields: doc.fields.filter(f => r.boxes[f.id]).map(f => ({ ...f, bbox: r.boxes[f.id], angle: (f.angle ?? 0) + (tracker.t.th * 180) / Math.PI })) };
           }
           const size = Math.round(0.27 * HEIGHT);
           const badge = { input: await renderBadge({ size, tick: tickN, state: charState, mood, mouth }), left: Math.round(0.012 * WIDTH), top: Math.round((ui.alert ? 0.1 : 0.02) * HEIGHT) };
-          rgba = await annotateFrame(snap, mode === 'fill' ? state : { ...state, fields: [] }, { ...ui, badge });
+          rgba = await annotateFrame(snap, state, { ...ui, badge });
         }
         source.captureFrame(new VideoFrame(rgba, WIDTH, HEIGHT, VideoBufferType.RGBA));
       } catch (err) {
@@ -225,7 +233,7 @@ const agent = defineAgent({
         let usable = nFields > 0 && !closeup;
         let finePart = null;
         if (!usable) { // a notice with no fields (like a scam letter) or a close-up: the fine print decides whether this is readable
-          finePart = await finePending;
+          finePart = await Promise.race([finePending, new Promise(res => setTimeout(() => res(null), 12000))]); // never wait more than 12 s for the small print
           if (!(finePart?.heads_up?.length || riskOf(finePart) > 0)) return { error: 'No readable page is visible. Ask the caller to show the whole page, well lit.' };
         }
         if (closeup) {
@@ -233,6 +241,9 @@ const agent = defineAgent({
           fineAnnounced = false;
         } else {
           const prevDoc = doc;
+          const labelOf = id => prevDoc?.fields?.find(f => f.id === id)?.label_en;
+          const keepHighlight = labelOf(ui.currentField), keepBanner = ui.banner;
+          const keepIssues = Object.entries(ui.issues).map(([id, msg]) => [labelOf(id), msg]).filter(([l]) => l);
           const prev = { fine, fineAnnounced, briefed, scamWarned, labels: new Set((doc?.fields ?? []).map(f => f.label_en?.toLowerCase())) };
           const tickLabels = new Set((doc?.fields ?? []).filter(f => tickTold.has(f.id)).map(f => f.label_en));
           const toldLabels = new Set((doc?.fields ?? []).filter(f => spoken.has(f.id)).map(f => f.label_en));
@@ -257,6 +268,11 @@ const agent = defineAgent({
           } else { memory.length = 0; toldHeads.clear(); }
           newSection = sameDocument && !samePage && mode === 'fill' && Date.now() - lastNewSectionAt > 15000;
           if (newSection) lastNewSectionAt = Date.now();
+          if (sameDocument || overlap >= 0.3) { // same document: the highlighted field and the red marks stay (field ids change on every read, the words do not)
+            const byLabel = l => doc.fields.find(f => f.label_en?.toLowerCase() === String(l).toLowerCase());
+            if (keepHighlight && byLabel(keepHighlight)) { ui.currentField = byLabel(keepHighlight).id; ui.banner = keepBanner; }
+            for (const [l, msg] of keepIssues) { const f = byLabel(l); if (f) ui.issues[f.id] = msg; }
+          }
           await tracker.setReference(snap, Object.fromEntries(doc.fields.map(f => [f.id, f.bbox])));
           if (samePage) { /* keep the earlier small-print result */ }
           else if (finePart) { const before = fine?.heads_up?.length ?? 0; mergeFine(finePart); if ((fine?.heads_up?.length ?? 0) > before) fineAnnounced = false; fineSettled = true; }
@@ -291,7 +307,7 @@ const agent = defineAgent({
     // the background (at most once per 8 s, so a face or empty desk does not burn API calls).
     const prefetchTimer = setInterval(async () => {
       const changedLong = (lostSince && Date.now() - lostSince > 1500) || (movedSince && Date.now() - movedSince > 1200); // boxes hidden, or the caller scrolled: read the view again now
-      if (MOCK || reading || !latest || !visionProvider() || Date.now() - lastTry < (changedLong ? 3000 : 8000)) return;
+      if (MOCK || reading || !latest || !visionProvider() || Date.now() - lastTry < (changedLong ? 10000 : 25000)) return; // page re-reads are model calls too: keep them rare
       try {
         const png = await currentPng();
         if (!png) return;
@@ -303,7 +319,12 @@ const agent = defineAgent({
 
     // ---- Tools the voice model can call ----
     const fieldList = () => (doc?.fields ?? []).map(f => `- ${f.id}: ${f.label_en} / ${f.label_es}${f.filled ? ` [filled: ${JSON.stringify(f.value)}]` : ' [empty]'}${f.uncertain ? ' [on-screen box position is APPROXIMATE: describe it in words]' : ''}`).join('\n');
-    const findField = id => doc?.fields?.find(f => f.id === id);
+    const findField = id => {
+      const want = String(id ?? '').toLowerCase();
+      return doc?.fields?.find(f => f.id === id)
+        ?? doc?.fields?.find(f => f.label_en?.toLowerCase() === want || f.label_es?.toLowerCase() === want)
+        ?? doc?.fields?.find(f => want.length > 3 && (f.label_en?.toLowerCase().includes(want) || want.includes(f.label_en?.toLowerCase() ?? '\u0000')));
+    };
     const describePage = () => {
       const parts = [`Document: ${doc.doc_type} (${doc.language ?? '?'}).`];
       if (doc.summary_en) parts.push(`Summary: ${doc.summary_en}`, `Summary (es): ${doc.summary_es}`);
@@ -325,6 +346,19 @@ const agent = defineAgent({
       parts.push('NOTE: this describes only the part in front of the camera. For any specific question, call ask_document so you look at it again.');
       return parts.join('\n');
     };
+    // Choosing what help the caller wants. Used by the set_mode tool, and by our own fallback when the model forgets to call it.
+    const applyMode = (m, language) => {
+      mode = m; modeAt = Date.now(); ui.lang = language; ui.chip = MODE_LABEL[m];
+      ui.currentField = undefined; ui.issues = {}; seen.clear(); spoken.clear();
+      console.log('mode chosen:', m);
+        if (!doc) { // nothing read yet: the director briefs the caller as soon as the page is ready
+          briefed = false; ui.banner = 'Muestre su documento · Hold up your document';
+          return `${DIRECTIVE[m]}\nNo document has been read yet. Say a short polite "Sure!" in the caller's language, ask them to hold the document up to the camera, steady and well lit, then wait. You will be told when it is ready.`;
+        }
+      ui.banner = '';
+      briefed = true;
+      return `${DIRECTIVE[m]}\n\n${describePage()}`;
+    };
     const tools = {
       set_mode: llm.tool({
         description: 'Call this as soon as the caller says what they want help with: "fill" (help fill out the form), "understand" (explain what the document says), "scam" (check whether it looks like a scam), or "other" (anything else about the document: translate, explain a word, answer a question). Call it again if the kind of help changes.',
@@ -332,18 +366,7 @@ const agent = defineAgent({
           mode: z.enum(['fill', 'understand', 'scam', 'other']),
           language: z.enum(['es', 'en']).describe('the language the caller speaks'),
         }),
-        execute: async ({ mode: m, language }) => {
-          mode = m; modeAt = Date.now(); ui.lang = language; ui.chip = MODE_LABEL[m];
-          ui.currentField = undefined; ui.issues = {}; seen.clear(); spoken.clear();
-          console.log('mode chosen:', m);
-          if (!doc) { // nothing read yet: the director briefs the caller as soon as the page is ready
-            briefed = false; ui.banner = 'Muestre su documento · Hold up your document';
-            return `${DIRECTIVE[m]}\nNo document has been read yet. Say a short polite "Sure!" in the caller's language, ask them to hold the document up to the camera, steady and well lit, then wait. You will be told when it is ready.`;
-          }
-          ui.banner = '';
-          briefed = true;
-          return `${DIRECTIVE[m]}\n\n${describePage()}`;
-        },
+        execute: async ({ mode: m, language }) => applyMode(m, language),
       }),
       ask_document: llm.tool({
         description: 'Look at what is in front of the camera RIGHT NOW and answer one specific question about the document: after the caller scrolled, turned the page or moved the camera, or whenever they ask about a detail (a price, a date, what to bring, where to sign, what a sentence means). Use this instead of ever saying you cannot see something.',
@@ -367,7 +390,7 @@ const agent = defineAgent({
               console.error('ask_document failed', err?.message?.slice(0, 120));
               if (mine === askId) pendingAnswer = { q: question, answer: '', ok: false };
             }
-            directorTick(); // speak it right away instead of waiting for the next tick
+            try { directorTick(); } catch { /* the timer tries again */ } // speak it right away instead of waiting for the next tick
           })();
           return 'Looking at the document now. Say ONE short sentence like "Let me check", then stop and wait: the answer arrives by itself in a few seconds.';
         },
@@ -396,7 +419,7 @@ const agent = defineAgent({
         },
       }),
       highlight_field: llm.tool({
-        description: 'Draw a box and a label on the caller\'s screen around one field of the form, to show where to write.',
+        description: 'Draw a box and a label on the caller\'s screen around one field of the form. Use it ONLY when the caller asks to be shown where a field is ("where do I write it", "show me", "highlight it"), never on your own.',
         parameters: z.object({
           field_id: z.string().describe('id of the field from read_page'),
           language: z.enum(['es', 'en']).describe('language the caller speaks, for the on-screen label'),
@@ -404,11 +427,12 @@ const agent = defineAgent({
         execute: async ({ field_id, language }) => {
           const f = findField(field_id);
           if (!f) return `Unknown field "${field_id}". Valid ids:\n${fieldList()}`;
-          ui.currentField = field_id;
+          ui.currentField = f.id; lastHighlightAt = Date.now();
           ui.lang = language;
           ui.banner = (language === 'es' ? f.hint_es : f.hint_en) ?? '';
           const warn = f.uncertain ? ' CAUTION: the box on the caller\'s screen is only approximate. Say the field\'s printed words and where it is on the page (top/bottom/left/right) so there is no doubt which one you mean.' : '';
-          return `Highlighted "${f.label_en}". Hint: ${language === 'es' ? f.hint_es : f.hint_en}${warn}`;
+          const hidden = lostSince ? ' NOTE: the camera view just changed, so the box may not appear for a few seconds: ask the caller to hold the page steady.' : '';
+          return `Highlighted "${f.label_en}". Hint: ${language === 'es' ? f.hint_es : f.hint_en}${warn}${hidden}`;
         },
       }),
       flag_issue: llm.tool({
@@ -430,20 +454,70 @@ const agent = defineAgent({
       }),
     };
 
-    const session = new voice.AgentSession({
+    const makeSession = () => new voice.AgentSession({
       // Reads GOOGLE_API_KEY from .env.local. Change `voice` to any name in the plugin's Voice type.
       llm: new realtime.RealtimeModel({ model: process.env.VOICE_MODEL || 'gemini-2.5-flash-native-audio-preview-12-2025', voice: 'Aoede' }),
     });
-    session.on(voice.AgentSessionEventTypes.Error, e => console.error('session error', e?.error?.message ?? e));
+    let session = makeSession();
+    let closing = false; // the call is over: do not rebuild the voice session
+    const sessionHandlers = []; // every handler we attach, so that a rebuilt session gets them all again
+    const onSession = (event, fn) => { sessionHandlers.push([event, fn]); session.on(event, fn); };
+    // A reply that cannot be spoken (the session just died) must never crash the program: log it and carry on.
+    const speak = opts => { try { return session.generateReply(opts); } catch (err) { console.error('could not speak:', err?.message); return null; } };
+    const saySafe = (...a) => { try { return session.say(...a); } catch (err) { console.error('could not play the recording:', err?.message); return null; } };
+    onSession(voice.AgentSessionEventTypes.Error, e => console.error('session error', e?.error?.message ?? e));
     let tReady = 0;
     // Greeting bookkeeping. Other proactive speech (small-print heads-up, mistake corrections) waits until the greeting
     // is done: two replies at once make the later one cancel the earlier, so the caller never hears the greeting.
     let readyAt = 0, greeted = false, greetedAt = 0, everSpoke = false;
     const mayInterjectNow = () => greeted ? Date.now() - greetedAt > 1200 : readyAt && Date.now() - readyAt > 9000;
-    session.on(voice.AgentSessionEventTypes.AgentStateChanged, e => {
+    onSession(voice.AgentSessionEventTypes.AgentStateChanged, e => {
       agentState = e.newState;
       if (e.newState === 'speaking') everSpoke = true;
       if (tReady && e.newState === 'speaking') { console.log(`first audio ${Date.now() - tReady} ms after bridge ready`); tReady = 0; }
+    });
+
+    // ---- Safety net: the model sometimes SAYS it highlighted a field without calling the tool ----
+    // The caller's words are transcribed (and logged, so a bad call can be read afterwards). If they ask to be shown a field and
+    // the model has not drawn a box 3.5 s later, draw it ourselves: the field whose words they used, else the first empty one.
+    const HIGHLIGHT_ASK = /highlight|show me|point (to|at)|where (do|should|can|would) i (write|sign|put|fill|type)|which (field|box|line|one)|resalt|mu[eé]str|d[oó]nde|se[ñn]ala|ens[eé][ñn]a/i;
+    onSession(voice.AgentSessionEventTypes.UserInputTranscribed, e => {
+      if (!e.isFinal || !e.transcript?.trim()) return;
+      console.log('caller said:', e.transcript.trim().slice(0, 160));
+      // Lip-sync tuning by voice: "the mouth is early / fast / ahead" -> wait longer; "late / slow / behind" -> wait less.
+      if (/mouth|lips?\b|lip.?sync|boca|labios/i.test(e.transcript)) {
+        if (/early|fast|quick|ahead|before|soon|too much|r[aá]pid|adelant|antes/i.test(e.transcript)) mouthDelayMs = Math.min(3500, mouthDelayMs + 250);
+        else if (/late|slow|behind|after|lag|delay|lent|atr[aá]s|despu[eé]s|tarde/i.test(e.transcript)) mouthDelayMs = Math.max(0, mouthDelayMs - 250);
+        console.log('lip sync delay is now', mouthDelayMs, 'ms');
+      }
+      // If they asked for a kind of help and the model has not switched mode 4 s later, switch it ourselves and brief them.
+      const wantMode = /fill (this|it|the form|that)? ?(out|in)|fill out|fill in|complete (this|the|my) form|help me fill|llen(ar|a|ame)|ay[uú]dame a llenar|rellen/i.test(e.transcript) ? 'fill'
+        : /scam|fraud|fake|legit|estafa|fraude|falso|enga[ñn]/i.test(e.transcript) ? 'scam'
+        : /summar|explain|what (does|is) (this|it)|understand|resum|expl[ií]ca|entend|qu[eé] dice/i.test(e.transcript) ? 'understand' : null;
+      if (wantMode) {
+        const spokeAt = Date.now(), lang = /[áéíóúñ¿¡]|ayuda|llen|formulario|estafa|resum|expl[ií]ca|entend|qu[eé] dice/i.test(e.transcript) ? 'es' : 'en';
+        setTimeout(() => {
+          if (modeAt >= spokeAt || mode === wantMode) return; // the model switched it itself
+          console.log('fallback mode switch (the model did not call set_mode):', wantMode);
+          applyMode(wantMode, lang);
+          briefed = false; // the model never got the page information: let the director brief the caller
+        }, 4000);
+      }
+      if (!doc?.fields?.length || !HIGHLIGHT_ASK.test(e.transcript)) return;
+      const askedAt = Date.now(), said = e.transcript.toLowerCase();
+      setTimeout(() => {
+        if (lastHighlightAt >= askedAt || !doc?.fields?.length) return; // the model drew it itself
+        const words = t => String(t ?? '').toLowerCase().split(/\W+/).filter(w => w.length > 3);
+        let best = null, bestScore = 0;
+        for (const f of doc.fields) {
+          const sc = [...new Set([...words(f.label_en), ...words(f.label_es)])].filter(w => said.includes(w)).length;
+          if (sc > bestScore) { best = f; bestScore = sc; }
+        }
+        const f = best ?? doc.fields.find(x => !x.filled) ?? doc.fields[0];
+        ui.currentField = f.id; lastHighlightAt = Date.now();
+        ui.banner = (ui.lang === 'es' ? f.hint_es : f.hint_en) ?? '';
+        console.log('fallback highlight (the model did not call the tool):', f.label_en);
+      }, 3500);
     });
 
     // ---- The director: decides when Notice speaks up on its own ----
@@ -456,7 +530,7 @@ const agent = defineAgent({
       if (pendingAnswer) {
         const p = pendingAnswer; pendingAnswer = null; ui.banner = '';
         console.log('speaking up: answer to', p.q);
-        session.generateReply({ instructions: p.ok
+        speak({ instructions: p.ok
           ? `The caller asked: "${p.q}". Looking at the document just now, the answer is: ${p.answer} Tell them this in the language they have been speaking, in at most three short sentences. If it says the part is not visible, kindly tell them what to scroll to or show. Do not call any tools.`
           : 'You could not look at the document just now. In ONE short sentence, in the language they have been speaking, ask the caller to hold the document steady in front of the camera and ask again. Do not call any tools.' });
         return;
@@ -465,27 +539,27 @@ const agent = defineAgent({
       if (mode && !doc && lastReadError && Date.now() - modeAt > 7000 && Date.now() - lastReadError.t < 10000 && Date.now() - lastErrorSpokenAt > 15000) {
         lastErrorSpokenAt = Date.now();
         console.log('speaking up: page not readable');
-        session.generateReply({ instructions: `The system could not read the caller's page yet: ${lastReadError.msg} In ONE short sentence, in the language they have been speaking, tell them kindly what to do. Do not call any tools.` });
+        speak({ instructions: `The system could not read the caller's page yet: ${lastReadError.msg} In ONE short sentence, in the language they have been speaking, tell them kindly what to do. Do not call any tools.` });
         return;
       }
       if (!doc) return;
       if (riskOf(fine) >= 3 && !scamWarned) {
         scamWarned = true; fineAnnounced = true;
         console.log('speaking up: scam warning');
-        session.generateReply({ instructions: `You just finished checking the caller's page and it shows strong signs of a scam (${(fine.scam_check.signs_en ?? []).join('; ')}). In the language they have been speaking (Spanish if they have not spoken yet), say calmly in at most two sentences that this looks like a scam, that they should NOT pay or share personal information, and that they should contact the organization using a phone number or website they already trust. Do not call any tools.` });
+        speak({ instructions: `You just finished checking the caller's page and it shows strong signs of a scam (${(fine.scam_check.signs_en ?? []).join('; ')}). In the language they have been speaking (Spanish if they have not spoken yet), say calmly in at most two sentences that this looks like a scam, that they should NOT pay or share personal information, and that they should contact the organization using a phone number or website they already trust. Do not call any tools.` });
         return;
       }
       if (mode && !briefed && (fineSettled || Date.now() - docAt > 6000)) {
         briefed = true; fineAnnounced = true;
         console.log(`speaking up: briefing (${mode})`);
         ui.banner = '';
-        session.generateReply({ instructions: `The caller chose "${mode}" and their document is now ready. Reply in the language they have been speaking to you. ${DIRECTIVE[mode]}\n\n${describePage()}` });
+        speak({ instructions: `The caller chose "${mode}" and their document is now ready. Reply in the language they have been speaking to you. ${DIRECTIVE[mode]}\n\n${describePage()}` });
       }
       // While filling out, the caller scrolled to another part of the form: carry on there.
       if (newSection && mode === 'fill' && briefed) {
         newSection = false; ui.currentField = undefined;
         console.log('speaking up: new part of the form');
-        session.generateReply({ instructions: `The caller has moved to a different part of the document. Call highlight_field for the first empty field in the list below, then say in ONE short sentence that you can see this new part and what to write in that field.\n${fieldList()}` });
+        speak({ instructions: `The caller has moved to a different part of the document. Say in ONE short sentence that you can see this new part, and describe the first empty field in the list below in words (its printed label and what to write). Do not draw a box unless they ask.\n${fieldList()}` });
         return;
       }
       // The small print can finish after the briefing: if it holds something important that was not said yet, say it now.
@@ -495,15 +569,15 @@ const agent = defineAgent({
         console.log('speaking up: small print that arrived late');
         fresh.forEach(h => toldHeads.add(h.plain_en));
         const points = fresh.slice(0, 4).map(h => `- ${h.plain_en}${h.action_en ? ` (do: ${h.action_en})` : ''}`).join('\n');
-        session.generateReply({ instructions: `You have just finished reading the small print on the caller's page. In the language they have been speaking, tell them the most important points in at most three short sentences, starting with something like "One more thing from the small print". Points:\n${points}\nDo not call any tools.` });
+        speak({ instructions: `You have just finished reading the small print on the caller's page. In the language they have been speaking, tell them the most important points in at most three short sentences, starting with something like "One more thing from the small print". Points:\n${points}\nDo not call any tools.` });
       }
     };
-    const directorTimer = setInterval(() => directorTick(), 1500);
+    const directorTimer = setInterval(() => { try { directorTick(); } catch (err) { console.error('director failed', err?.message); } }, 1500);
 
     // ---- The "it caught my mistake" moment ----
     // Every few seconds, once read_page has run, look at the handwriting. An issue must be seen on two checks in a
     // row (one blurry frame must not cause a false alarm) before we draw a red box and speak. It clears itself when fixed.
-    const REVIEW_EVERY_MS = 3500;
+    const REVIEW_EVERY_MS = 7000; // was 3.5 s: every check is a model call, and the free Gemini quota is shared with the live voice
     let reviewing = false;
     const reviewTimer = setInterval(async () => {
       if (reviewing || MOCK || mode !== 'fill' || !doc?.fields?.length || !latest || !visionProvider()) return;
@@ -542,7 +616,7 @@ const agent = defineAgent({
           const d = ticked[0];
           tickTold.add(d.id);
           console.log('reading back tick:', d.label_en);
-          session.generateReply({ instructions: `The caller just ticked a checkbox. Its printed words are: "${d.label_en}" (Spanish: "${d.label_es}"). In ONE short sentence, in the language they have been speaking, read that option aloud and ask them to confirm it is the answer they want. Do not call any tools.` });
+          speak({ instructions: `The caller just ticked a checkbox. Its printed words are: "${d.label_en}" (Spanish: "${d.label_es}"). In ONE short sentence, in the language they have been speaking, read that option aloud and ask them to confirm it is the answer they want. Do not call any tools.` });
         }
         // Speak only when the model is free; otherwise the red box stays and we try again next round.
         if (toSay.length && agentState !== 'speaking' && agentState !== 'thinking' && mayInterjectNow()) {
@@ -550,7 +624,7 @@ const agent = defineAgent({
           spoken.add(id);
           console.log('mistake caught:', id, '-', issue.problem_en);
           const label = findField(id)?.label_en ?? id;
-          session.generateReply({
+          speak({
             instructions: `The system noticed a mistake on the caller's form, field "${label}": ${issue.problem_en} Tell the caller kindly in ONE short sentence, in the language they have been speaking to you, and say how to fix it. A red box is now showing on their screen. Do not call any tools.`,
           });
         }
@@ -561,6 +635,7 @@ const agent = defineAgent({
       }
     }, REVIEW_EVERY_MS);
     ctx.addShutdownCallback(async () => {
+      closing = true;
       clearInterval(directorTimer);
       clearInterval(reviewTimer);
       clearInterval(timer);
@@ -568,7 +643,7 @@ const agent = defineAgent({
       await track.close();
       await source.close();
     });
-    await session.start({
+    const startOpts = () => ({
       room: ctx.room,
       agent: new voice.Agent({ instructions, tools }),
       record: false,
@@ -582,14 +657,14 @@ const agent = defineAgent({
       },
       outputOptions: { audioEnabled: true, transcriptionEnabled: false },
     });
+    await session.start(startOpts());
     await videoPublished;
 
     // ---- Lip sync ----
     // The mouth follows the REAL loudness of the voice, not the "speaking" flag (which turns on long before the sound reaches
     // the phone). Each audio frame we send is stamped with when it will play (frames queue up and play in real time), and the
-    // mouth reads the loudness MOUTH_DELAY_MS later: roughly the time the sound needs to travel through LiveKit, the Mac and
-    // FaceTime to the phone. Mouth ahead of the voice -> raise MOUTH_DELAY_MS; mouth behind -> lower it.
-    const MOUTH_DELAY_MS = Number(process.env.MOUTH_DELAY_MS ?? 1000);
+    // mouth reads the loudness mouthDelayMs later: roughly the time the sound needs to travel through LiveKit, the Mac and
+    // FaceTime to the phone. Mouth ahead of the voice -> raise the delay; mouth behind -> lower it (say it out loud during a call: "the mouth is early / late").
     const amps = [];
     let playoutEnd = 0, tapped = false;
     const tap = frame => {
@@ -607,7 +682,7 @@ const agent = defineAgent({
     };
     mouthLevel = () => {
       if (!tapped) return null;
-      const at = Date.now() - MOUTH_DELAY_MS;
+      const at = Date.now() - mouthDelayMs;
       while (amps.length && amps[0].t + amps[0].dur < at - 300) amps.shift();
       let sum = 0, n = 0;
       for (const e of amps) if (e.t <= at && e.t + e.dur > at - 90) { sum += e.a; n++; }
@@ -619,10 +694,34 @@ const agent = defineAgent({
       const orig = out.captureFrame.bind(out);
       out.captureFrame = frame => { tap(frame); return orig(frame); };
       out.__tapped = true;
-      console.log(`lip sync: following the voice with a ${MOUTH_DELAY_MS} ms delay`);
+      console.log(`lip sync: following the voice with a ${mouthDelayMs} ms delay`);
     };
     patchAudio();
-    session.on(voice.AgentSessionEventTypes.AgentStateChanged, patchAudio); // reapply if the output was replaced
+    onSession(voice.AgentSessionEventTypes.AgentStateChanged, patchAudio); // reapply if the output was replaced
+
+    // ---- If the Gemini voice session dies mid-call, build a new one ----
+    // Gemini Live sometimes closes the session with an error ("audio content type is not supported"). Without this the agent stays
+    // mute for the rest of the call. We start a fresh session (same instructions and tools), re-attach every handler, and say so.
+    let recovering = false, recoveries = 0;
+    const recover = async () => {
+      if (recovering || closing || recoveries >= 3 || !ctx.room.isConnected) return;
+      recovering = true; recoveries++;
+      console.log(`voice session died: building a new one (${recoveries} of 3)`);
+      try {
+        session = makeSession();
+        for (const [event, fn] of sessionHandlers) session.on(event, fn);
+        await session.start(startOpts());
+        patchAudio();
+        agentState = 'listening'; greeted = true; greetedAt = Date.now(); everSpoke = true;
+        console.log('new voice session is running');
+        speak({ instructions: `Your voice connection just had a brief hiccup. In ONE short sentence, in the language the caller has been speaking (Spanish if unsure), say you are back and ask them to repeat what they need. Current state: ${mode ? `you are in "${mode}" mode` : 'no help mode chosen yet'}. Do not call any tools.` });
+      } catch (err) {
+        console.error('could not rebuild the voice session:', err?.message?.slice(0, 160));
+      } finally {
+        recovering = false;
+      }
+    };
+    onSession(voice.AgentSessionEventTypes.Close, e => { if (!closing && e?.reason === 'error') recover(); });
 
     // Anything that blocks the program for long enough also stalls the voice: report it.
     let lastBeat = performance.now();
@@ -636,9 +735,17 @@ const agent = defineAgent({
     // room metadata): the Mac ends the call if it hears nothing within 10 seconds
     // of that. Participant arrival alone is not readiness, so there is no greeting
     // on it. Without the signal there is no greeting, and the caller speaks first.
+    // The live model greets (this path was stable). The PRE-RECORDED greeting (assets/greeting.pcm, same Gemini voice) is only the
+    // emergency backup: if nothing is heard 4 s after FaceTime is ready, it plays so the call is never silent (the Mac hangs up
+    // after 10 s). Playing it as the FIRST greeting preceded a Gemini Live session crash when the caller started to speak.
+    // It is NOT added to the conversation history (that crashed the Gemini Live session once); the instructions tell the model about it instead.
+    const recorded = loadGreeting();
+    console.log(recorded ? `pre-recorded greeting loaded (${recorded.seconds.toFixed(1)} s)` : 'no pre-recorded greeting: the live model will greet');
     const sayGreeting = again => {
-      const h = session.generateReply({ instructions: greeting, allowInterruptions: false });
-      h.addDoneCallback(sh => {
+      const h = recorded && again
+        ? saySafe(recorded.text, { audio: recorded.stream(), allowInterruptions: true, addToChatCtx: false }) // interruptible: if the caller speaks over it, it just stops (an uninterruptible greeting plus early speech preceded a Gemini session crash)
+        : speak({ instructions: greeting });
+      h?.addDoneCallback(sh => {
         console.log(`greeting ${sh.interrupted ? 'was INTERRUPTED' : 'finished'} ${Date.now() - readyAt} ms after bridge ready${again ? ' (second try)' : ''}`);
         greeted = true; greetedAt = Date.now();
       });
@@ -649,7 +756,7 @@ const agent = defineAgent({
       console.log('bridge ready: greeting now');
       sayGreeting(false);
       // If nothing has been heard 5 s later, say it again: a silent call is hung up by the Mac after 10 s.
-      watchdog = setTimeout(() => { if (!everSpoke) { console.log('no audio 5 s after bridge ready: greeting again'); sayGreeting(true); } }, 5000);
+      watchdog = setTimeout(() => { if (!everSpoke) { console.log('no audio 4 s after bridge ready: playing the recorded greeting'); sayGreeting(true); } }, 4000);
     });
     ctx.addShutdownCallback(async () => clearTimeout(watchdog));
     ctx.addShutdownCallback(async () => stopGreeting());
